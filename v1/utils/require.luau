@@ -670,6 +670,19 @@ end
 ]]
 
 function module.require(str, from)
+    if type(str) ~= "string" then
+		error(
+			"require expected a string, got "
+				.. typeof(str)
+				.. " ("
+				.. tostring(str)
+				.. ")"
+				.. "\nRequired from: "
+				.. tostring(from),
+			2
+		)
+	end
+
 	local target =
 		module.resolve(
 			str,
