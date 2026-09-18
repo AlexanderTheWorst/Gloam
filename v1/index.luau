@@ -1,5 +1,5 @@
 local Module = loadstring(httpget(
-	"https://raw.githubusercontent.com/AlexanderTheWorst/Gloam/main/v1/utils/require.luau?v=2"
+	"https://raw.githubusercontent.com/AlexanderTheWorst/Gloam/main/v1/utils/require.luau"
 ))()
 
 Module.cwd =
