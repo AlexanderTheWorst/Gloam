@@ -162,11 +162,6 @@ function module.resolve(to, from)
 		)
 	end
 
-	-- Keep existing behavior for root-style paths.
-	if to:sub(1, 1) ~= "." then
-		return origin .. "/" .. to
-	end
-
 	-- Remove filename from parent.
 	local directory =
 		currentPath:match("^(.*)/[^/]+$")
