@@ -1,70 +1,64 @@
 local module = {}
 
-module.cwd = "http://127.0.0.1:5500/v1/"
+module.cwd =
+	"http://127.0.0.1:5500/v1/"
 
 module.cache = {}
 
-local HttpService = game:GetService("HttpService")
+local HttpService =
+	game:GetService("HttpService")
 
 
 --[[
-	URL helpers
+	URL
 ]]
 
 local function stripQuery(url)
-	return url:match("^([^?]+)") or url
+	return url:match("^([^?]+)")
+		or url
 end
 
-local function getQuery(url)
-	return url:match("(%?.*)$")
+
+local function splitUrl(url)
+	url = stripQuery(url)
+
+	local origin, path =
+		url:match(
+			"^(https?://[^/]+)/(.*)$"
+		)
+
+	if origin then
+		return origin, path
+	end
+
+	origin =
+		url:match(
+			"^(https?://[^/]+)$"
+		)
+
+	if origin then
+		return origin, ""
+	end
+
+	return nil, nil
 end
 
-local function isGithubContents(url)
-	return url:match(
-		"^https://api%.github%.com/repos/[^/]+/[^/]+/contents"
-	) ~= nil
-end
 
-local function isGithubRaw(url)
-	return url:match(
-		"^https://raw%.githubusercontent%.com/"
-	) ~= nil
-end
+local function splitPath(path)
+	local result = {}
 
-local function appendPath(url, path)
-	local query = getQuery(url)
-	local base = stripQuery(url)
-
-	base = base:gsub("/+$", "")
-	path = path:gsub("^/+", "")
-
-	local result = base .. "/" .. path
-
-	if query then
-		result ..= query
+	for part in path:gmatch("[^/]+") do
+		table.insert(
+			result,
+			part
+		)
 	end
 
 	return result
 end
 
-local function normalizeUrl(url)
-	local query = getQuery(url)
-	local base = stripQuery(url)
 
-	local protocol, rest =
-		base:match("^(https?://)(.*)$")
-
-	if not protocol then
-		return url
-	end
-
-	local host, path =
-		rest:match("^([^/]+)/(.*)$")
-
-	if not host then
-		return url
-	end
-
+local function normalizePath(path)
 	local parts = {}
 
 	for part in path:gmatch("[^/]+") do
@@ -72,37 +66,66 @@ local function normalizeUrl(url)
 			if #parts > 0 then
 				table.remove(parts)
 			end
-		elseif part ~= "." and part ~= "" then
-			table.insert(parts, part)
+
+		elseif
+			part ~= "."
+			and part ~= ""
+		then
+			table.insert(
+				parts,
+				part
+			)
 		end
 	end
 
-	local result =
-		protocol
-		.. host
-		.. "/"
-		.. table.concat(parts, "/")
-
-	if query then
-		result ..= query
-	end
-
-	return result
+	return table.concat(
+		parts,
+		"/"
+	)
 end
 
 
---[[
-	Convert:
+local function joinUrl(
+	base,
+	path
+)
+	base =
+		base:gsub("/+$", "")
 
-	https://raw.githubusercontent.com/User/Repo/main/path/file.luau
+	path =
+		path:gsub("^/+", "")
 
-	into:
+	if path == "" then
+		return base
+	end
 
-	https://api.github.com/repos/User/Repo/contents/path/file.luau?ref=main
-]]
+	return base
+		.. "/"
+		.. path
+end
 
-local function rawToContents(url)
-	local owner, repo, ref, path =
+
+local function dirname(path)
+	return path:match(
+		"^(.*)/[^/]+$"
+	) or ""
+end
+
+
+local function isGithubRaw(url)
+	return url:match(
+		"^https://raw%.githubusercontent%.com/"
+	) ~= nil
+end
+
+
+local function parseGithubRaw(url)
+	url = stripQuery(url)
+
+	local owner,
+		repo,
+		ref,
+		path =
 		url:match(
 			"^https://raw%.githubusercontent%.com/([^/]+)/([^/]+)/([^/]+)/(.*)$"
 		)
@@ -111,227 +134,524 @@ local function rawToContents(url)
 		return nil
 	end
 
-	local result =
-		"https://api.github.com/repos/"
+	local root =
+		"https://raw.githubusercontent.com/"
 		.. owner
 		.. "/"
 		.. repo
-		.. "/contents"
+		.. "/"
+		.. ref
+		.. "/"
 
-	if path and path ~= "" then
-		result ..= "/" .. path
-	end
+	return {
+		owner = owner,
+		repo = repo,
+		ref = ref,
 
-	result ..= "?ref=" .. ref
-
-	return result
+		root = root,
+		path = path,
+	}
 end
 
 
 --[[
-	Resolve module paths
+	Resolve
+
+	All non-absolute paths are relative.
+
+	./Foo
+	../Foo
+	Foo
+
+	all work.
 ]]
 
-function module.resolve(to, from)
+function module.resolve(
+	to,
+	from
+)
+	if type(to) ~= "string" then
+		error(
+			"resolve expected string, got "
+				.. typeof(to)
+				.. "\nFrom: "
+				.. tostring(from),
+			2
+		)
+	end
+
 	-- Already absolute.
 	if to:match("^https?://") then
 		return to
 	end
 
-	-- Resolve against cwd.
-	if not from then
-		return appendPath(
-			module.cwd,
-			to:gsub("^%./", "")
-		)
+	local baseUrl
+	local baseIsDirectory
+
+	if from then
+		baseUrl = from
+		baseIsDirectory = false
+	else
+		baseUrl = module.cwd
+		baseIsDirectory = true
 	end
 
-	local query = getQuery(from)
-	local cleanFrom = stripQuery(from)
+	local origin, basePath =
+		splitUrl(baseUrl)
 
-	local origin =
-		cleanFrom:match("^(https?://[^/]+)")
-
-	local currentPath =
-		cleanFrom:match("^https?://[^/]+/(.*)$")
-
-	if not origin or not currentPath then
-		error(
-			"Invalid module URL: "
-				.. tostring(from)
-		)
-	end
-
-	-- Remove filename from parent.
-	local directory =
-		currentPath:match("^(.*)/[^/]+$")
-		or ""
-
-	local path =
-		directory
-		.. "/"
-		.. to
-
-	local parts = {}
-
-	for part in path:gmatch("[^/]+") do
-		if part == ".." then
-			if #parts > 0 then
-				table.remove(parts)
-			end
-		elseif part ~= "." then
-			table.insert(parts, part)
-		end
-	end
-
-	local result =
-		origin
-		.. "/"
-		.. table.concat(parts, "/")
-
-	-- Preserve ?ref=main for GitHub Contents URLs.
 	if
-		query
-		and isGithubContents(from)
+		not origin
+		or basePath == nil
 	then
-		result ..= query
+		error(
+			"Invalid base URL: "
+				.. tostring(baseUrl)
+		)
 	end
 
-	return result
+	local baseDirectory
+
+	if baseIsDirectory then
+		baseDirectory =
+			basePath:gsub("/+$", "")
+	else
+		baseDirectory =
+			dirname(basePath)
+	end
+
+	local path
+
+	if to:sub(1, 1) == "/" then
+		path =
+			to:sub(2)
+	else
+		path =
+			baseDirectory
+			.. "/"
+			.. to
+	end
+
+	path =
+		normalizePath(path)
+
+	return joinUrl(
+		origin,
+		path
+	)
 end
 
+
 --[[
-	Read a module source.
+	HTTP
+]]
 
-	Supports:
+local function get(url)
+	local response =
+		httpget(url)
 
-	- static-web-server
-	- raw.githubusercontent.com
-	- api.github.com/repos/.../contents/...
+	if
+		not response
+		or response == ""
+	then
+		error(
+			"Empty HTTP response"
+				.. "\nURL: "
+				.. tostring(url)
+		)
+	end
+
+	return response
+end
+
+
+--[[
+	Source
 ]]
 
 local function fetchSource(url)
-	-- GitHub Contents API.
-	if isGithubContents(url) then
-		local response = httpget(url)
+	return get(url)
+end
 
-		if not response then
-			error(
-				"Failed to retrieve GitHub file: "
-					.. url
+
+--[[
+	Relative paths
+]]
+
+local function relativeUrl(
+	target,
+	base
+)
+	local targetOrigin,
+		targetPath =
+		splitUrl(target)
+
+	local baseOrigin,
+		basePath =
+		splitUrl(base)
+
+	if
+		not targetOrigin
+		or not baseOrigin
+	then
+		error(
+			"Invalid URL while creating relative path."
+		)
+	end
+
+	if targetOrigin ~= baseOrigin then
+		return target
+	end
+
+	local baseDirectory =
+		dirname(basePath)
+
+	local targetParts =
+		splitPath(targetPath)
+
+	local baseParts =
+		splitPath(baseDirectory)
+
+	local common = 0
+
+	while
+		common < #targetParts
+		and common < #baseParts
+		and targetParts[common + 1]
+			== baseParts[common + 1]
+	do
+		common += 1
+	end
+
+	local result = {}
+
+	for _ = common + 1, #baseParts do
+		table.insert(
+			result,
+			".."
+		)
+	end
+
+	for i = common + 1, #targetParts do
+		table.insert(
+			result,
+			targetParts[i]
+		)
+	end
+
+	if #result == 0 then
+		return "./"
+	end
+
+	return "./"
+		.. table.concat(
+			result,
+			"/"
+		)
+end
+
+
+local function formatGlobPath(
+	path,
+	from,
+	pathType
+)
+	if pathType ~= "relative" then
+		return path
+	end
+
+	if from then
+		return relativeUrl(
+			path,
+			from
+		)
+	end
+
+	-- Public Module.glob(..., nil, {path="relative"})
+	-- makes it relative to cwd.
+	local fakeModule =
+		module.cwd:gsub("/+$", "")
+		.. "/__root__.luau"
+
+	return relativeUrl(
+		path,
+		fakeModule
+	)
+end
+
+
+--[[
+	Glob matching
+]]
+
+local luaMagic = {
+	["^"] = true,
+	["$"] = true,
+	["("] = true,
+	[")"] = true,
+	["%"] = true,
+	["."] = true,
+	["["] = true,
+	["]"] = true,
+	["+"] = true,
+	["-"] = true,
+	["?"] = true,
+}
+
+
+local function segmentMatches(
+	value,
+	pattern
+)
+	local converted = {}
+
+	for i = 1, #pattern do
+		local char =
+			pattern:sub(i, i)
+
+		if char == "*" then
+			table.insert(
+				converted,
+				".*"
+			)
+
+		elseif luaMagic[char] then
+			table.insert(
+				converted,
+				"%"
+					.. char
+			)
+
+		else
+			table.insert(
+				converted,
+				char
 			)
 		end
+	end
 
-		local success, data = pcall(
-            HttpService.JSONDecode,
-            HttpService,
-            response
-        )
+	local luaPattern =
+		"^"
+		.. table.concat(converted)
+		.. "$"
 
-        if not success then
-            error(
-                "Failed to parse GitHub response"
-                    .. "\nURL: "
-                    .. tostring(url)
-                    .. "\nResponse:\n"
-                    .. tostring(response):sub(1, 1000)
-            )
-        end
+	return value:match(
+		luaPattern
+	) ~= nil
+end
 
-		if typeof(data) ~= "table" then
-			error(
-				"Invalid GitHub Contents response: "
-					.. url
-			)
+
+local function globMatches(
+	pattern,
+	path
+)
+	local patternParts =
+		splitPath(pattern)
+
+	local pathParts =
+		splitPath(path)
+
+	local function match(
+		patternIndex,
+		pathIndex
+	)
+		if
+			patternIndex
+			> #patternParts
+		then
+			return pathIndex
+				> #pathParts
 		end
 
-		if data.type ~= "file" then
-			error(
-				"Expected a file from GitHub Contents API: "
-					.. url
-			)
-		end
+		local patternPart =
+			patternParts[
+				patternIndex
+			]
 
-		-- Prefer raw source.
-		if data.download_url then
-			local source =
-				httpget(data.download_url)
+		if patternPart == "**" then
+			-- ** matches zero segments.
+			if
+				match(
+					patternIndex + 1,
+					pathIndex
+				)
+			then
+				return true
+			end
 
-			if not source then
-				error(
-					"Failed to retrieve GitHub raw file: "
-						.. data.download_url
+			-- ** matches one or more segments.
+			if
+				pathIndex <= #pathParts
+			then
+				return match(
+					patternIndex,
+					pathIndex + 1
 				)
 			end
 
-			return source
+			return false
 		end
 
-		error(
-			'GitHub file did not contain a "download_url": '
-				.. url
+		if pathIndex > #pathParts then
+			return false
+		end
+
+		if
+			not segmentMatches(
+				pathParts[pathIndex],
+				patternPart
+			)
+		then
+			return false
+		end
+
+		return match(
+			patternIndex + 1,
+			pathIndex + 1
 		)
 	end
 
-	-- Raw GitHub / static server.
-	local source = httpget(url)
-
-	if not source then
-		error(
-			"Failed to retrieve module: "
-				.. url
-		)
-	end
-
-	return source
+	return match(1, 1)
 end
 
+
 --[[
-	List a directory.
+	GitHub manifest
 
-	Normalizes static-web-server and GitHub Contents
-	into:
+	files.json exists at repository root.
 
-	{
-		{
-			name = "...",
-			type = "file" | "directory",
-			url = "..."
-		}
-	}
+	Example:
+	https://raw.githubusercontent.com/
+	    user/repo/main/files.json
 ]]
 
-local function listDirectory(directory)
-	local requestUrl = directory
+local githubManifests = {}
 
-	-- raw.githubusercontent.com cannot list directories.
-	if isGithubRaw(requestUrl) then
-		requestUrl = rawToContents(requestUrl)
 
-		if not requestUrl then
-			error(
-				"Failed to convert raw GitHub URL to Contents API: "
-					.. tostring(directory)
+local function getGithubManifest(url)
+	local github =
+		parseGithubRaw(url)
+
+	if not github then
+		error(
+			"Invalid raw GitHub URL: "
+				.. tostring(url)
+		)
+	end
+
+	local cache =
+		githubManifests[
+			github.root
+		]
+
+	if cache then
+		return cache, github
+	end
+
+	local manifestUrl =
+		github.root
+		.. "files.json"
+
+	local response =
+		get(manifestUrl)
+
+	local success, manifest =
+		pcall(
+			HttpService.JSONDecode,
+			HttpService,
+			response
+		)
+
+	if not success then
+		error(
+			"Failed to parse files.json"
+				.. "\nURL: "
+				.. manifestUrl
+				.. "\nResponse:\n"
+				.. response:sub(
+					1,
+					1000
+				)
+		)
+	end
+
+	if typeof(manifest) ~= "table" then
+		error(
+			"Invalid files.json manifest: "
+				.. manifestUrl
+		)
+	end
+
+	githubManifests[
+		github.root
+	] = manifest
+
+	return manifest, github
+end
+
+
+local function globGithub(
+	absolutePattern,
+	from,
+	pathType
+)
+	local manifest, github =
+		getGithubManifest(
+			absolutePattern
+		)
+
+	-- absolutePattern is already repo-relative
+	-- after the raw GitHub prefix.
+	local patternPath =
+		github.path
+
+	local results = {}
+
+	for _, filePath in manifest do
+		if
+			type(filePath) == "string"
+			and globMatches(
+				patternPath,
+				filePath
+			)
+		then
+			local url =
+				github.root
+				.. filePath
+
+			table.insert(
+				results,
+				formatGlobPath(
+					url,
+					from,
+					pathType
+				)
 			)
 		end
 	end
 
-	-- static-web-server expects trailing slash for directories
+	return results
+end
+
+
+--[[
+	Local directory listing
+]]
+
+local function listDirectory(
+	directory
+)
+	local requestUrl =
+		directory
+
 	if
-		not isGithubContents(requestUrl)
-		and requestUrl:sub(-1) ~= "/"
+		requestUrl:sub(-1)
+		~= "/"
 	then
 		requestUrl ..= "/"
 	end
 
-	local response = httpget(requestUrl)
-
-	if not response then
-		error(
-			"Failed to retrieve directory: "
-				.. tostring(requestUrl)
-		)
-	end
+	local response =
+		get(requestUrl)
 
 	local success, listing =
 		pcall(
@@ -342,80 +662,202 @@ local function listDirectory(directory)
 
 	if not success then
 		error(
-			"Failed to parse directory JSON"
+			"Failed to parse local directory listing"
 				.. "\nURL: "
-				.. tostring(requestUrl)
+				.. requestUrl
 				.. "\nResponse:\n"
-				.. tostring(response):sub(1, 1000)
+				.. response:sub(
+					1,
+					1000
+				)
 		)
 	end
 
 	if typeof(listing) ~= "table" then
 		error(
-			"Directory response was not a table"
+			"Invalid local directory listing"
 				.. "\nURL: "
-				.. tostring(requestUrl)
+				.. requestUrl
 		)
 	end
 
-	local result = {}
+	local results = {}
 
-	-- GitHub Contents API
-	if isGithubContents(requestUrl) then
-		-- Directory responses are arrays.
-		-- A file response is an object with .type.
-		if listing.type ~= nil then
-			error(
-				"Expected GitHub directory, received "
-					.. tostring(listing.type)
-					.. "\nURL: "
-					.. tostring(requestUrl)
-			)
+	for _, file in listing do
+		local fileType
+
+		if
+			file.type == "directory"
+			or file.type == "dir"
+		then
+			fileType = "directory"
+		else
+			fileType = "file"
 		end
 
-		for _, file in listing do
-			local fileType =
-				if file.type == "dir"
-					then "directory"
-					else "file"
-
-			table.insert(result, {
+		table.insert(
+			results,
+			{
 				name = file.name,
+
 				type = fileType,
 
-				-- Keep Contents API URLs internally
-				url = file.url,
+				url = joinUrl(
+					directory,
+					file.name
+				),
+			}
+		)
+	end
 
-				apiUrl = file.url,
-				downloadUrl = file.download_url,
-			})
+	return results
+end
+
+
+local function globLocal(
+	absolutePattern,
+	from,
+	pathType
+)
+	local origin,
+		path =
+		splitUrl(
+			absolutePattern
+		)
+
+	if not origin then
+		error(
+			"Invalid glob URL: "
+				.. absolutePattern
+		)
+	end
+
+	local parts =
+		splitPath(path)
+
+	local wildcardIndex
+
+	for i, part in parts do
+		if
+			part:find(
+				"*",
+				1,
+				true
+			)
+		then
+			wildcardIndex = i
+			break
+		end
+	end
+
+	-- No wildcard.
+	if not wildcardIndex then
+		return {
+			formatGlobPath(
+				absolutePattern,
+				from,
+				pathType
+			),
+		}
+	end
+
+	local prefix = {}
+
+	for i = 1, wildcardIndex - 1 do
+		table.insert(
+			prefix,
+			parts[i]
+		)
+	end
+
+	local directory =
+		joinUrl(
+			origin,
+			table.concat(
+				prefix,
+				"/"
+			)
+		)
+
+	local results = {}
+
+
+	local function walk(
+		currentDirectory,
+		index
+	)
+		local part =
+			parts[index]
+
+		if not part then
+			return
 		end
 
-		return result
-	end
+		local listing =
+			listDirectory(
+				currentDirectory
+			)
 
-	-- static-web-server
-	for _, file in listing do
-		local fileType =
+		if part == "**" then
+			-- Zero directories.
+			walk(
+				currentDirectory,
+				index + 1
+			)
+
+			-- One or more directories.
+			for _, entry in listing do
+				if
+					entry.type
+					== "directory"
+				then
+					walk(
+						entry.url,
+						index
+					)
+				end
+			end
+
+			return
+		end
+
+		for _, entry in listing do
 			if
-				file.type == "directory"
-				or file.type == "dir"
+				segmentMatches(
+					entry.name,
+					part
+				)
 			then
-				"directory"
-			else
-				"file"
+				if index == #parts then
+					table.insert(
+						results,
+						formatGlobPath(
+							entry.url,
+							from,
+							pathType
+						)
+					)
 
-		table.insert(result, {
-			name = file.name,
-			type = fileType,
-			url = appendPath(
-				directory,
-				file.name
-			),
-		})
+				elseif
+					entry.type
+					== "directory"
+				then
+					walk(
+						entry.url,
+						index + 1
+					)
+				end
+			end
+		end
 	end
 
-	return result
+
+	walk(
+		directory,
+		wildcardIndex
+	)
+
+	return results
 end
 
 
@@ -423,7 +865,19 @@ end
 	Glob
 ]]
 
-function module.glob(pattern, from, options)
+function module.glob(
+	pattern,
+	from,
+	options
+)
+	if type(pattern) ~= "string" then
+		error(
+			"glob expected string, got "
+				.. typeof(pattern),
+			2
+		)
+	end
+
 	options = options or {}
 
 	local pathType =
@@ -439,251 +893,25 @@ function module.glob(pattern, from, options)
 		)
 	end
 
-	local results = {}
-
-	local parts = {}
-
-	for part in pattern:gmatch("[^/]+") do
-		table.insert(parts, part)
-	end
-
-	-- Find first wildcard.
-	local wildcardIndex
-
-	for i, part in parts do
-		if part:find("*", 1, true) then
-			wildcardIndex = i
-			break
-		end
-	end
-
-	-- No wildcard.
-	if not wildcardIndex then
-		local path =
-			module.resolve(
-				pattern,
-				from
-			)
-
-		if pathType == "relative" then
-			return {
-				pattern,
-			}
-		end
-
-		return {
-			path,
-		}
-	end
-
-	-- Resolve everything before wildcard.
-	local prefix =
-		table.concat(
-			parts,
-			"/",
-			1,
-			wildcardIndex - 1
-		)
-
-	local directory =
+	local absolutePattern =
 		module.resolve(
-			prefix,
+			pattern,
 			from
 		)
 
-	local function matches(name, pattern)
-		local luaPattern =
-			pattern
-				:gsub("%%", "%%%%")
-				:gsub("%.", "%%.")
-				:gsub("%*", ".*")
-
-		return name:match(
-			"^"
-				.. luaPattern
-				.. "$"
-		) ~= nil
+	if isGithubRaw(absolutePattern) then
+		return globGithub(
+			absolutePattern,
+			from,
+			pathType
+		)
 	end
 
-	local function relative(path, base)
-		local cleanPath =
-			stripQuery(path)
-
-		local cleanBase =
-			stripQuery(base)
-
-		local pathOrigin =
-			cleanPath:match(
-				"^(https?://[^/]+)"
-			)
-
-		local pathPart =
-			cleanPath:match(
-				"^https?://[^/]+/(.*)$"
-			)
-
-		local baseOrigin =
-			cleanBase:match(
-				"^(https?://[^/]+)"
-			)
-
-		local basePart =
-			cleanBase:match(
-				"^https?://[^/]+/(.*)$"
-			)
-
-		if
-			not pathOrigin
-			or not pathPart
-		then
-			error(
-				"Invalid path: "
-					.. tostring(path)
-			)
-		end
-
-		if
-			not baseOrigin
-			or not basePart
-		then
-			error(
-				"Invalid base path: "
-					.. tostring(base)
-			)
-		end
-
-		if pathOrigin ~= baseOrigin then
-			return path
-		end
-
-		local baseDirectory =
-			basePart:match(
-				"^(.*)/[^/]+$"
-			)
-			or ""
-
-		local pathParts = {}
-		local baseParts = {}
-
-		for part in pathPart:gmatch("[^/]+") do
-			table.insert(
-				pathParts,
-				part
-			)
-		end
-
-		for part in baseDirectory:gmatch("[^/]+") do
-			table.insert(
-				baseParts,
-				part
-			)
-		end
-
-		local common = 0
-
-		while
-			common < #pathParts
-			and common < #baseParts
-			and pathParts[common + 1]
-				== baseParts[common + 1]
-		do
-			common += 1
-		end
-
-		local result = {}
-
-		for _ = common + 1, #baseParts do
-			table.insert(
-				result,
-				".."
-			)
-		end
-
-		for i = common + 1, #pathParts do
-			table.insert(
-				result,
-				pathParts[i]
-			)
-		end
-
-		return "./"
-			.. table.concat(
-				result,
-				"/"
-			)
-	end
-
-	local function formatPath(path)
-		if
-			pathType == "relative"
-			and from
-		then
-			return relative(
-				path,
-				from
-			)
-		end
-
-		return path
-	end
-
-	local function walk(directory, index)
-		local part =
-			parts[index]
-
-		if not part then
-			return
-		end
-
-		local listing =
-			listDirectory(directory)
-
-		-- ** = zero or more directories
-		if part == "**" then
-			-- Zero directories.
-			walk(
-				directory,
-				index + 1
-			)
-
-			-- One or more directories.
-			for _, file in listing do
-				if file.type == "directory" then
-					walk(
-						file.url,
-						index
-					)
-				end
-			end
-
-			return
-		end
-
-		for _, file in listing do
-			if matches(file.name, part) then
-				if index == #parts then
-					table.insert(
-						results,
-						formatPath(
-							file.url
-						)
-					)
-				elseif file.type == "directory" then
-					walk(
-						file.url,
-						index + 1
-					)
-				end
-			end
-		end
-	end
-
-	walk(
-		directory,
-		wildcardIndex
+	return globLocal(
+		absolutePattern,
+		from,
+		pathType
 	)
-
-	return results
 end
 
 
@@ -691,8 +919,11 @@ end
 	Require
 ]]
 
-function module.require(str, from)
-    if type(str) ~= "string" then
+function module.require(
+	str,
+	from
+)
+	if type(str) ~= "string" then
 		error(
 			"require expected a string, got "
 				.. typeof(str)
@@ -716,30 +947,39 @@ function module.require(str, from)
 
 	if not entry then
 		entry = {
-			source = fetchSource(target),
+			source =
+				fetchSource(
+					target
+				),
+
 			module = nil,
+
 			loading = false,
 			loaded = false,
 		}
 
-		module.cache[target] = entry
+		module.cache[target] =
+			entry
 	end
 
-	-- Already loaded.
 	if entry.loaded then
 		return entry.module
 	end
 
-	-- Cyclic dependency.
+	-- Circular dependency.
 	if entry.loading then
 		return entry.module
 	end
 
 	entry.loading = true
+
 	entry.module = {}
 
-	local chunk, loadError =
-		loadstring(entry.source)
+	local chunk,
+		loadError =
+		loadstring(
+			entry.source
+		)
 
 	if not chunk then
 		entry.loading = false
@@ -765,39 +1005,66 @@ function module.require(str, from)
 	end
 
 	local require =
-		setmetatable({
-			glob = function(pattern, options)
-				return module.glob(
+		setmetatable(
+			{
+				glob = function(
 					pattern,
-					target,
 					options
 				)
-			end,
+					return module.glob(
+						pattern,
+						target,
+						options
+					)
+				end,
 
-			resolve = function(to)
-				return module.resolve(
-					to,
-					target
+				resolve = function(to)
+					return module.resolve(
+						to,
+						target
+					)
+				end,
+
+				source = target,
+			},
+			{
+				__call = function(
+					_,
+					path
 				)
-			end,
+					return module.require(
+						path,
+						target
+					)
+				end,
+			}
+		)
 
-			source = target,
-		}, {
-			__call = function(_, path)
-				return module.require(
-					path,
-					target
-				)
-			end,
-		})
+	local success,
+		result =
+		pcall(
+			factory,
+			require
+		)
 
-	entry.module =
-		factory(require)
+	if not success then
+		entry.loading = false
+
+		error(
+			"Failed to execute module "
+				.. target
+				.. ":\n"
+				.. tostring(result)
+		)
+	end
+
+	entry.module = result
 
 	entry.loading = false
 	entry.loaded = true
 
 	return entry.module
 end
+
 
 return module

@@ -5,19 +5,44 @@ local Module = loadstring(httpget(
 Module.cwd =
 	"https://raw.githubusercontent.com/AlexanderTheWorst/Gloam/main/v1/"
 
-local IconPack = Module.require("./utils/icons/IconPack.luau")
-local Icon = Module.require("./utils/icons/Icon.luau")
+local IconPack =
+	Module.require(
+		"./utils/icons/IconPack.luau"
+	)
 
-local Component = Module.require("./classes/Component.luau")
-local ComponentRegistry = Module.require("./registry/ComponentRegistry.luau")
+local Icon =
+	Module.require(
+		"./utils/icons/Icon.luau"
+	)
 
-Component.setRegistry(ComponentRegistry)
+local Component =
+	Module.require(
+		"./classes/Component.luau"
+	)
+
+local ComponentRegistry =
+	Module.require(
+		"./registry/ComponentRegistry.luau"
+	)
+
+Component.setRegistry(
+	ComponentRegistry
+)
 
 return {
-	Screen = Module.require("./components/Screen.luau"),
+	Screen =
+		Module.require(
+			"./components/Screen.luau"
+		),
 
-	Events = Module.require("./utils/events/Events.luau").EventsDescriptor,
+	Events =
+		Module.require(
+			"./utils/events/Events.luau"
+		).EventsDescriptor,
 
-	IconPack = IconPack.IconPack,
-	Icon = Icon.Icon,
+	IconPack =
+		IconPack.IconPack,
+
+	Icon =
+		Icon.Icon,
 }
