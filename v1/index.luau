@@ -1,4 +1,4 @@
-local Module = loadstring(httpget("https://api.github.com/repos/AlexanderTheWorst/Gloam/contents/v1/utils/require.luau"))()
+local Module = loadstring(httpget("https://raw.githubusercontent.com/AlexanderTheWorst/Gloam/refs/heads/main/v1/utils/require.luau"))()
 Module.cwd = "https://api.github.com/repos/AlexanderTheWorst/Gloam/contents/v1/"
 
 local IconPack = Module.require("./utils/icons/IconPack.luau")
