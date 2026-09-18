@@ -4,7 +4,7 @@ return function (require)
     local EventHandler = require("../utils/events/EventHandler.luau")
 
     local IconUtils = require("../utils/icons/Icon.luau")
-    local IconPackUtils = require("../utils/icons/iconPack.luau")
+    local IconPackUtils = require("../utils/icons/IconPack.luau")
 
     local DefaultIcons = require("../utils/defaults/Icons.luau")
 
