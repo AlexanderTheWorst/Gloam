@@ -222,8 +222,21 @@ local function fetchSource(url)
 			)
 		end
 
-		local data =
-			HttpService:JSONDecode(response)
+		local success, data = pcall(
+            HttpService.JSONDecode,
+            HttpService,
+            response
+        )
+
+        if not success then
+            error(
+                "Failed to parse GitHub response"
+                    .. "\nURL: "
+                    .. tostring(url)
+                    .. "\nResponse:\n"
+                    .. tostring(response):sub(1, 1000)
+            )
+        end
 
 		if typeof(data) ~= "table" then
 			error(
