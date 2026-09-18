@@ -296,19 +296,19 @@ end
 local function listDirectory(directory)
 	local requestUrl = directory
 
-	-- Transparently switch over to Contents API.
-	if isGithubRaw(directory) then
-		requestUrl = rawToContents(directory)
+	-- raw.githubusercontent.com cannot list directories.
+	if isGithubRaw(requestUrl) then
+		requestUrl = rawToContents(requestUrl)
 
 		if not requestUrl then
 			error(
-				"Failed to convert GitHub raw URL to Contents API: "
-					.. directory
+				"Failed to convert raw GitHub URL to Contents API: "
+					.. tostring(directory)
 			)
 		end
 	end
 
-	-- Static-web-server generally expects the trailing slash.
+	-- static-web-server expects trailing slash for directories
 	if
 		not isGithubContents(requestUrl)
 		and requestUrl:sub(-1) ~= "/"
@@ -316,23 +316,37 @@ local function listDirectory(directory)
 		requestUrl ..= "/"
 	end
 
-	local response =
-		httpget(requestUrl)
+	local response = httpget(requestUrl)
 
 	if not response then
 		error(
-			"Failed to retrieve module directory: "
-				.. requestUrl
+			"Failed to retrieve directory: "
+				.. tostring(requestUrl)
 		)
 	end
 
-	local listing =
-		HttpService:JSONDecode(response)
+	local success, listing =
+		pcall(
+			HttpService.JSONDecode,
+			HttpService,
+			response
+		)
+
+	if not success then
+		error(
+			"Failed to parse directory JSON"
+				.. "\nURL: "
+				.. tostring(requestUrl)
+				.. "\nResponse:\n"
+				.. tostring(response):sub(1, 1000)
+		)
+	end
 
 	if typeof(listing) ~= "table" then
 		error(
-			"Invalid module directory response: "
-				.. requestUrl
+			"Directory response was not a table"
+				.. "\nURL: "
+				.. tostring(requestUrl)
 		)
 	end
 
@@ -340,30 +354,30 @@ local function listDirectory(directory)
 
 	-- GitHub Contents API
 	if isGithubContents(requestUrl) then
+		-- Directory responses are arrays.
+		-- A file response is an object with .type.
+		if listing.type ~= nil then
+			error(
+				"Expected GitHub directory, received "
+					.. tostring(listing.type)
+					.. "\nURL: "
+					.. tostring(requestUrl)
+			)
+		end
+
 		for _, file in listing do
 			local fileType =
 				if file.type == "dir"
 					then "directory"
-					else file.type
-
-			local url
-
-			if fileType == "directory" then
-				-- Use GitHub's own API URL so ?ref=main
-				url = file.url
-			else
-				-- Return raw URLs for actual files when possible.
-				url =
-					file.download_url
-					or file.url
-			end
+					else "file"
 
 			table.insert(result, {
 				name = file.name,
 				type = fileType,
-				url = url,
 
-				-- Keep these around in case they're useful later.
+				-- Keep Contents API URLs internally
+				url = file.url,
+
 				apiUrl = file.url,
 				downloadUrl = file.download_url,
 			})
@@ -376,8 +390,8 @@ local function listDirectory(directory)
 	for _, file in listing do
 		local fileType =
 			if
-				file.type == "dir"
-				or file.type == "directory"
+				file.type == "directory"
+				or file.type == "dir"
 			then
 				"directory"
 			else
