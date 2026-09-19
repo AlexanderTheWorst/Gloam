@@ -6,7 +6,7 @@ return function (require)
     function events.ExtractEvents(props) 
         local extracted = {}
         
-        for _, prop in props do
+        for _, prop in ipairs(props) do
             if typeof(prop) == "table" and prop.type and prop.type == "Event" then
                 if not table.find(validEvents, prop.key) then error(`Error: {prop.key} is not a valid event.`) end
                 extracted[prop.key] = prop.cb

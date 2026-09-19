@@ -1,5 +1,4 @@
 return function(require)
-
     local ContentProvider = game:GetService("ContentProvider")
 
     --[[
@@ -19,7 +18,7 @@ return function(require)
 
         @return IconPackLoader
     ]]
-    local function IconPackLoader(url)
+    return function (url)
         if typeof(url) ~= "string" then
             error("Error: Pack provided is invalid!")
         end
@@ -114,6 +113,4 @@ return function(require)
 
         return loader
     end
-
-    return IconPackLoader
 end

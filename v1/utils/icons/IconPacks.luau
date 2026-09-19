@@ -6,7 +6,7 @@ return function (require)
 
     local resolvedPacks = {}
 
-    for _, pack in packs do
+    for _, pack in ipairs(packs) do
         local target = pack:split(dir)[2]:sub(2)
 
         local slashCount = select(2, target:gsub("/", ""))

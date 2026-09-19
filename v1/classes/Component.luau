@@ -34,6 +34,7 @@ return function(require)
 
         return setmetatable(self, {
             __index = function(self, index)
+                print(self, index)
                 local method = component[index]
 
                 if method then

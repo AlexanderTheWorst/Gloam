@@ -606,7 +606,7 @@ local function globGithub(
 
 	local results = {}
 
-	for _, filePath in manifest do
+	for _, filePath in ipairs(manifest) do
 		if
 			type(filePath) == "string"
 			and globMatches(
@@ -637,77 +637,50 @@ end
 	Local directory listing
 ]]
 
-local function listDirectory(
-	directory
-)
-	local requestUrl =
-		directory
+local function listDirectory(directory)
+	local requestUrl = directory
 
-	if
-		requestUrl:sub(-1)
-		~= "/"
-	then
+	if requestUrl:sub(-1) ~= "/" then
 		requestUrl ..= "/"
 	end
 
-	local response =
-		get(requestUrl)
+	local response = get(requestUrl)
 
-	local success, listing =
-		pcall(
-			HttpService.JSONDecode,
-			HttpService,
-			response
-		)
+	local success, listing = pcall(
+		HttpService.JSONDecode,
+		HttpService,
+		response
+	)
 
 	if not success then
 		error(
-			"Failed to parse local directory listing"
-				.. "\nURL: "
-				.. requestUrl
-				.. "\nResponse:\n"
-				.. response:sub(
-					1,
-					1000
-				)
-		)
-	end
-
-	if typeof(listing) ~= "table" then
-		error(
-			"Invalid local directory listing"
-				.. "\nURL: "
-				.. requestUrl
+			"Failed to parse local directory listing:\n"
+				.. tostring(listing)
 		)
 	end
 
 	local results = {}
 
-	for _, file in listing do
-		local fileType
+	for i = 1, #listing do
+		local file = listing[i]
 
-		if
-			file.type == "directory"
-			or file.type == "dir"
-		then
-			fileType = "directory"
-		else
-			fileType = "file"
-		end
+		local fileType =
+			if file.type == "directory"
+				or file.type == "dir"
+			then "directory"
+			else "file"
 
-		table.insert(
-			results,
-			{
-				name = file.name,
+		local url =
+			joinUrl(
+				directory,
+				file.name
+			)
 
-				type = fileType,
-
-				url = joinUrl(
-					directory,
-					file.name
-				),
-			}
-		)
+		results[#results + 1] = {
+			name = file.name,
+			type = fileType,
+			url = url,
+		}
 	end
 
 	return results
@@ -737,7 +710,7 @@ local function globLocal(
 
 	local wildcardIndex
 
-	for i, part in parts do
+	for i, part in ipairs(parts) do
 		if
 			part:find(
 				"*",
@@ -806,7 +779,7 @@ local function globLocal(
 			)
 
 			-- One or more directories.
-			for _, entry in listing do
+			for _, entry in ipairs(listing) do
 				if
 					entry.type
 					== "directory"
@@ -821,7 +794,7 @@ local function globLocal(
 			return
 		end
 
-		for _, entry in listing do
+		for _, entry in ipairs(listing) do
 			if
 				segmentMatches(
 					entry.name,
@@ -947,19 +920,13 @@ function module.require(
 
 	if not entry then
 		entry = {
-			source =
-				fetchSource(
-					target
-				),
-
+			source = fetchSource(target),
 			module = nil,
-
 			loading = false,
 			loaded = false,
 		}
 
-		module.cache[target] =
-			entry
+		module.cache[target] = entry
 	end
 
 	if entry.loaded then
@@ -972,7 +939,6 @@ function module.require(
 	end
 
 	entry.loading = true
-
 	entry.module = {}
 
 	local chunk,
@@ -983,24 +949,14 @@ function module.require(
 
 	if not chunk then
 		entry.loading = false
+		entry.module = nil
 
 		error(
 			"Failed to compile module "
 				.. target
 				.. ":\n"
-				.. tostring(loadError)
-		)
-	end
-
-	local factory =
-		chunk()
-
-	if typeof(factory) ~= "function" then
-		entry.loading = false
-
-		error(
-			"Module did not return a factory function: "
-				.. target
+				.. tostring(loadError),
+			2
 		)
 	end
 
@@ -1041,30 +997,52 @@ function module.require(
 		)
 
 	local success,
-		result =
+		export =
 		pcall(
-			factory,
-			require
+			chunk
 		)
 
 	if not success then
 		entry.loading = false
+		entry.module = nil
 
 		error(
-			"Failed to execute module "
+			"Failed to load module "
 				.. target
 				.. ":\n"
-				.. tostring(result)
+				.. tostring(export),
+			2
 		)
 	end
 
-	entry.module = result
+	-- A function is a module factory and receives our custom require.
+	if typeof(export) == "function" then
+		success,
+			export =
+			pcall(
+				export,
+				require
+			)
 
+		if not success then
+			entry.loading = false
+			entry.module = nil
+
+			error(
+				"Failed to execute module "
+					.. target
+					.. ":\n"
+					.. tostring(export),
+				2
+			)
+		end
+	end
+
+	entry.module = export
 	entry.loading = false
 	entry.loaded = true
 
 	return entry.module
 end
-
 
 return module

@@ -1,3 +1,5 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 return function (require)
     local Component = require("../classes/Component.luau")
 
@@ -87,7 +89,7 @@ return function (require)
         ScreenGUI.IgnoreGuiInset = true
         ScreenGUI.ResetOnSpawn = false
         ScreenGUI.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-        ScreenGUI.Parent = game:GetService("CoreGui")
+        ScreenGUI.Parent = RunService:IsStudio() and Players.LocalPlayer.PlayerGui or game:GetService("CoreGui")
 
         self.context:Add(ScreenGUI)
 
@@ -121,7 +123,7 @@ return function (require)
         )
 
         local function UpdateLoadingUIs()
-            for i, entry in LoadingUIs do
+            for i, entry in ipairs(LoadingUIs) do
                 local offset = i * -LOADING_UI_SPACING
 
                 TweenService:Create(entry.ui.Instance, LOADING_UI_TWEEN, {
@@ -146,7 +148,7 @@ return function (require)
         local function RemoveLoadingUI(ui)
             local index
 
-            for i, entry in LoadingUIs do
+            for i, entry in ipairs(LoadingUIs) do
                 if entry.ui == ui then
                     index = i
                     break
@@ -162,7 +164,7 @@ return function (require)
                 -- Re-check because the stack may have changed while waiting.
                 local currentIndex
 
-                for i, entry in LoadingUIs do
+                for i, entry in ipairs(LoadingUIs) do
                     if entry.ui == ui then
                         currentIndex = i
                         break
@@ -229,7 +231,7 @@ return function (require)
         end
 
         local function finishedLoading()
-            for key, loading in loadingStates do
+            for key, loading in ipairs(loadingStates) do
                 if loading then
                     return false
                 end
